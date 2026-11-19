@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Infinite Horizons</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#91b8d0; font-family:Inter,system-ui,Segoe UI,sans-serif; color:#fff; }
+  canvas { display:block; }
+  #hud { position:fixed; inset:0; pointer-events:none; }
+  .panel { background:linear-gradient(135deg,rgba(8,18,27,.72),rgba(8,18,27,.38)); border:1px solid rgba(255,255,255,.16); box-shadow:0 8px 30px #0002; backdrop-filter:blur(12px); border-radius:14px; }
+  #brand { position:absolute; top:20px; left:22px; padding:12px 16px; }
+  #brand strong { display:block; font-size:14px; letter-spacing:.18em; text-transform:uppercase; }
+  #brand span { color:#b8d7e5; font-size:11px; letter-spacing:.08em; }
+  #stats { position:absolute; top:20px; right:22px; padding:12px 16px; min-width:150px; text-align:right; font-size:12px; color:#d9edf4; line-height:1.7; }
+  #stats b { color:white; font-variant-numeric:tabular-nums; }
+  #crosshair { position:absolute; left:50%; top:50%; width:12px; height:12px; transform:translate(-50%,-50%); }
+  #crosshair:before,#crosshair:after { content:""; position:absolute; background:rgba(255,255,255,.9); box-shadow:0 1px 4px #0008; }
+  #crosshair:before { width:2px;height:12px;left:5px;top:0; }
+  #crosshair:after { height:2px;width:12px;top:5px;left:0; }
+  #bottom { position:absolute; left:50%; bottom:22px; transform:translateX(-50%); padding:10px 16px; color:#dcebf0; font-size:12px; white-space:nowrap; }
+  #toast { position:absolute; left:50%; top:18%; transform:translate(-50%,-8px); opacity:0; transition:.25s; padding:10px 15px; font-size:13px; }
+  #toast.show { opacity:1; transform:translate(-50%,0); }
+  #overlay { position:fixed; inset:0; display:grid; place-items:center; background:linear-gradient(180deg,rgba(8,22,32,.28),rgba(4,12,19,.78)); z-index:5; }
+  #intro { width:min(520px,calc(100vw - 32px)); padding:34px; text-align:center; border-radius:22px; background:rgba(8,20,29,.78); border:1px solid rgba(255,255,255,.2); box-shadow:0 25px 90px #0007; backdrop-filter:blur(18px); }
+  #intro .eyebrow { color:#9fd5d9; font-size:11px; letter-spacing:.25em; text-transform:uppercase; }
+  #intro h1 { margin:12px 0 8px; font-size:clamp(32px,7vw,52px); line-height:1; letter-spacing:-.055em; }
+  #intro p { color:#c4d8df; line-height:1.6; font-size:14px; margin:12px 0 22px; }
+  #play { border:0; color:#10232a; font-weight:800; letter-spacing:.08em; text-transform:uppercase; background:linear-gradient(135deg,#b9f1d1,#72c8c5); border-radius:999px; padding:14px 28px; cursor:pointer; box-shadow:0 8px 28px #66cbb455; }
+  #play:hover { filter:brightness(1.08); transform:translateY(-1px); }
+  .keys { display:flex; justify-content:center; gap:7px; flex-wrap:wrap; margin-top:20px; color:#a9c3ce; font-size:11px; }
+  kbd { border:1px solid #ffffff35; background:#ffffff12; border-radius:5px; padding:4px 7px; color:#fff; }
+  #mobile { display:none; position:fixed; bottom:20px; left:16px; right:16px; justify-content:space-between; pointer-events:none; z-index:3; }
+  .pad { display:grid; grid-template-columns:repeat(3,42px); grid-template-rows:repeat(2,42px); gap:5px; pointer-events:auto; }
+  .pad button { border:1px solid #ffffff55; background:#142c3b88; color:white; border-radius:10px; font-size:17px; touch-action:none; }
+  #lookHint { color:#8fb2bf; font-size:11px; margin-top:13px; }
+  @media (pointer:coarse) { #mobile { display:flex; } #bottom { bottom:125px; } }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="brand" class="panel"><strong>Infinite Horizons</strong><span>THE WORLD IS YOURS TO DISCOVER</span></div>
+  <div id="stats" class="panel">POSITION <b id="coords">0, 0</b><br>BIOME <b id="biome">Meadow</b><br>TIME <b id="clock">08:00</b></div>
+  <div id="crosshair"></div>
+  <div id="bottom" class="panel">WASD move · Mouse look · Shift sprint · Space jump · Esc pause</div>
+  <div id="toast" class="panel">World generated</div>
+</div>
+<div id="mobile">
+  <div class="pad">
+    <span></span><button data-key="w">▲</button><span></span>
+    <button data-key="a">◀</button><button data-key="s">▼</button><button data-key="d">▶</button>
+  </div>
+  <div class="pad" style="grid-template-columns:repeat(2,48px)">
+    <button data-key="shift">Run</button><button data-key=" ">Jump</button>
+  </div>
+</div>
+<div id="overlay">
+  <div id="intro">
+    <div class="eyebrow">A living, endless landscape</div>
+    <h1>Infinite<br>Horizons</h1>
+    <p>Wander through rolling meadows, quiet forests, and rocky highlands. The world is generated around you as you explore.</p>
+    <button id="play">Enter the world</button>
+    <div class="keys"><kbd>W A S D</kbd> Move <kbd>Mouse</kbd> Look <kbd>Shift</kbd> Sprint <kbd>Space</kbd> Jump</div>
+    <div id="lookHint">Click Enter, then click the world to capture your mouse. Press Esc to pause.</div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x91b8d0);
+scene.fog = new THREE.Fog(0x91b8d0, 45, 150);
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 260);
+camera.rotation.order = 'YXZ';
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const hemi = new THREE.HemisphereLight(0xc9e7ff, 0x65704a, 1.15); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffedce, 2.0);
+sun.position.set(-45,75,25); sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left = sun.shadow.camera.bottom = -65;
+sun.shadow.camera.right = sun.shadow.camera.top = 65;
+sun.shadow.bias = -0.0003;
+scene.add(sun);
+
+const CHUNK = 32, SEG = 24, RADIUS = 2;
+const chunks = new Map();
+const mats = {
+  grass: new THREE.MeshStandardMaterial({color:0x6f9c55, roughness:1}),
+  forest: new THREE.MeshStandardMaterial({color:0x527c48, roughness:1}),
+  rock: new THREE.MeshStandardMaterial({color:0x777b79, roughness:1}),
+  trunk: new THREE.MeshStandardMaterial({color:0x65452e, roughness:1}),
+  leaves: [0x315e3d,0x3d7045,0x527f49].map(c=>new THREE.MeshStandardMaterial({color:c, roughness:1})),
+  flower: new THREE.MeshStandardMaterial({color:0xe9d88a, roughness:.8})
+};
+
+function hash(x,z) {
+  let n = Math.imul(x,374761393) + Math.imul(z,668265263);
+  n = Math.imul(n ^ (n >>> 13),1274126177);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+}
+const lerp=(a,b,t)=>a+(b-a)*t;
+const smooth=t=>t*t*(3-2*t);
+function noise(x,z) {
+  const ix=Math.floor(x), iz=Math.floor(z), fx=smooth(x-ix), fz=smooth(z-iz);
+  const a=hash(ix,iz), b=hash(ix+1,iz), c=hash(ix,iz+1), d=hash(ix+1,iz+1);
+  return lerp(lerp(a,b,fx),lerp(c,d,fx),fz)*2-1;
+}
+function heightAt(x,z) {
+  const broad=noise(x*.012,z*.012)*8;
+  const hills=noise(x*.038+50,z*.038-20)*3.2;
+  const detail=noise(x*.11-10,z*.11+90)*.7;
+  return broad+hills+detail;
+}
+function biomeAt(x,z) {
+  const v=noise(x*.006+300,z*.006-200);
+  return v>.28?'Highlands':v<-.28?'Forest':'Meadow';
+}
+function makeTree(parent,x,y,z,scale,seed) {
+  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.13*scale,.2*scale,1.5*scale,6),mats.trunk);
+  trunk.position.set(x,y+.75*scale,z); trunk.castShadow=true; parent.add(trunk);
+  const leafMat=mats.leaves[Math.floor(seed*3)%3];
+  const crown=new THREE.Mesh(new THREE.ConeGeometry(.95*scale,2.5*scale,7),leafMat);
+  crown.position.set(x,y+2.15*scale,z); crown.castShadow=true; parent.add(crown);
+  const crown2=new THREE.Mesh(new THREE.ConeGeometry(.72*scale,1.9*scale,7),leafMat);
+  crown2.position.set(x,y+2.9*scale,z); crown2.castShadow=true; parent.add(crown2);
+}
+function buildChunk(cx,cz) {
+  const group=new THREE.Group(); group.position.set(cx*CHUNK,0,cz*CHUNK);
+  const positions=[], indices=[], colors=[];
+  for(let iz=0;iz<=SEG;iz++) for(let ix=0;ix<=SEG;ix++) {
+    const x=ix/SEG*CHUNK,z=iz/SEG*CHUNK;
+    const h=heightAt(cx*CHUNK+x,cz*CHUNK+z);
+    positions.push(x,h,z);
+    const shade=0.91+hash(cx*CHUNK+ix,cz*CHUNK+iz)*.15;
+    colors.push(shade,shade,shade);
+  }
+  for(let iz=0;iz<SEG;iz++) for(let ix=0;ix<SEG;ix++) {
+    const a=iz*(SEG+1)+ix,b=a+1,c=a+SEG+1,d=c+1;
+    indices.push(a,c,b,b,c,d);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+  geo.setIndex(indices); geo.computeVertexNormals();
+  const terrain=new THREE.Mesh(geo,mats.grass.clone());
+  terrain.material.vertexColors=true; terrain.receiveShadow=true; group.add(terrain);
+
+  // Scatter deterministic props; all positions are based on world coordinates.
+  for(let i=0;i<30;i++) {
+    const wx=cx*CHUNK+hash(cx*97+i,cz*71-i)*CHUNK;
+    const wz=cz*CHUNK+hash(cx*31-i,cz*113+i)*CHUNK;
+    const y=heightAt(wx,wz), r=hash(cx*151+i,cz*181-i);
+    const biome=biomeAt(wx,wz);
+    if(r<.57 && biome!=='Highlands') {
+      const s=.65+hash(cx*17+i,cz*19-i)*.8;
+      makeTree(group,wx-cx*CHUNK,y,wz-cz*CHUNK,s,hash(cx+i,cz-i));
+    } else if(r>.83 || biome==='Highlands' && r>.5) {
+      const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(.35+hash(i+cx,cz-i)*.65,0),mats.rock);
+      rock.position.set(wx-cx*CHUNK,y+.25,wz-cz*CHUNK);
+      rock.rotation.set(r*2,r*4,r*3); rock.scale.y=.65; rock.castShadow=true; group.add(rock);
+    }
+  }
+  scene.add(group); return group;
+}
+function updateChunks() {
+  const px=Math.floor(camera.position.x/CHUNK), pz=Math.floor(camera.position.z/CHUNK);
+  for(let z=pz-RADIUS;z<=pz+RADIUS;z++) for(let x=px-RADIUS;x<=px+RADIUS;x++) {
+    const key=x+','+z;
+    if(!chunks.has(key)) chunks.set(key,buildChunk(x,z));
+  }
+  for(const [key,obj] of chunks) {
+    const [x,z]=key.split(',').map(Number);
+    if(Math.abs(x-px)>RADIUS+1 || Math.abs(z-pz)>RADIUS+1) {
+      scene.remove(obj);
+      obj.traverse(o=>{if(o.geometry) o.geometry.dispose();});
+      chunks.delete(key);
+    }
+  }
+}
+
+const keys={};
+let yaw=0,pitch=0,velocityY=0,onGround=false,started=false,clockTime=8;
+const player={x:0,z:0};
+camera.position.set(0,heightAt(0,0)+1.75,0);
+const overlay=document.getElementById('overlay');
+const toast=document.getElementById('toast');
+let toastTimer;
+function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('show'),1700);}
+document.getElementById('play').addEventListener('click',()=>{
+  started=true; overlay.style.display='none'; renderer.domElement.requestPointerLock?.(); showToast('Welcome to the wilderness');
+});
+document.addEventListener('pointerlockchange',()=>{
+  if(document.pointerLockElement!==renderer.domElement && started) overlay.style.display='grid';
+});
+document.addEventListener('mousemove',e=>{
+  if(document.pointerLockElement!==renderer.domElement)return;
+  yaw-=e.movementX*.0022; pitch-=e.movementY*.0022;
+  pitch=Math.max(-Math.PI/2+.03,Math.min(Math.PI/2-.03,pitch));
+});
+document.addEventListener('keydown',e=>{
+  keys[e.key.toLowerCase()]=true;
+  if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(e.key.toLowerCase()))e.preventDefault();
+  if(e.code==='Space' && onGround && started){velocityY=8.2;onGround=false;}
+});
+document.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+document.querySelectorAll('[data-key]').forEach(btn=>{
+  const k=btn.dataset.key;
+  btn.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=true;});
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>btn.addEventListener(ev,()=>keys[k]=false));
+});
+renderer.domElement.addEventListener('click',()=>{if(started && document.pointerLockElement!==renderer.domElement)renderer.domElement.requestPointerLock?.();});
+
+let last=performance.now(), chunkCheck=0;
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt=Math.min((now-last)/1000,.04); last=now;
+  if(started) {
+    const forward=(keys.w||keys.arrowup?1:0)-(keys.s||keys.arrowdown?1:0);
+    const side=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);
+    const speed=(keys.shift?12:6)*dt;
+    const len=Math.hypot(forward,side)||1;
+    const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*side)/len*speed;
+    const dz=(Math.cos(yaw)*forward-Math.sin(yaw)*side)/len*speed;
+    camera.position.x+=dx; camera.position.z+=dz;
+    velocityY-=22*dt; camera.position.y+=velocityY*dt;
+    const floor=heightAt(camera.position.x,camera.position.z)+1.75;
+    if(camera.position.y<floor){camera.position.y=floor;velocityY=0;onGround=true;}
+    camera.rotation.set(pitch,yaw,0);
+    if(++chunkCheck%12===0)updateChunks();
+    clockTime=(clockTime+dt*.035)%24;
+    const daylight=Math.max(0,Math.sin((clockTime-6)/24*Math.PI*2));
+    sun.position.set(-45,35+daylight*55,25);
+    sun.intensity=.22+daylight*2.0;
+    hemi.intensity=.35+daylight*.95;
+    const sky=new THREE.Color().setHSL(.56,.34,.12+daylight*.48);
+    scene.background.copy(sky); scene.fog.color.copy(sky);
+    document.getElementById('coords').textContent=Math.round(camera.position.x)+', '+Math.round(camera.position.z);
+    document.getElementById('biome').textContent=biomeAt(camera.position.x,camera.position.z);
+    const hh=Math.floor(clockTime),mm=Math.floor((clockTime-hh)*60);
+    document.getElementById('clock').textContent=String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  }
+  renderer.render(scene,camera);
+}
+updateChunks();
+requestAnimationFrame(animate);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script>
+</body>
+</html>
