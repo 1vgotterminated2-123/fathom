@@ -23,6 +23,20 @@
   #bottom { position:absolute; left:50%; bottom:22px; transform:translateX(-50%); padding:10px 16px; color:#dcebf0; font-size:12px; white-space:nowrap; }
   #toast { position:absolute; left:50%; top:18%; transform:translate(-50%,-8px); opacity:0; transition:.25s; padding:10px 15px; font-size:13px; }
   #toast.show { opacity:1; transform:translate(-50%,0); }
+  #hotbar { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; gap:7px; pointer-events:auto; }
+  .slot { width:58px; height:58px; border:1px solid #ffffff55; border-radius:11px; background:rgba(8,20,29,.72); backdrop-filter:blur(10px); display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative; color:#fff; cursor:pointer; user-select:none; }
+  .slot.selected { border:2px solid #a9f0d0; box-shadow:0 0 0 2px #5ec6aa55,0 0 18px #76e0c755; background:rgba(31,74,66,.82); }
+  .slot .item-icon { font-size:23px; line-height:1.1; }
+  .slot .item-name { font-size:9px; color:#d4e8e8; margin-top:3px; }
+  .slot .count { position:absolute; right:6px; bottom:4px; font-size:11px; font-weight:800; text-shadow:0 1px 4px #000; }
+  .slot .number { position:absolute; left:5px; top:3px; font-size:9px; color:#b9d3dc; }
+  #inventory { display:none; position:fixed; z-index:4; left:50%; top:50%; transform:translate(-50%,-50%); width:min(490px,calc(100vw - 28px)); padding:20px; pointer-events:auto; background:rgba(8,20,29,.94); border:1px solid #ffffff38; border-radius:18px; box-shadow:0 25px 80px #0009; backdrop-filter:blur(18px); }
+  #inventory.open { display:block; }
+  #inventory h2 { margin:0 0 5px; font-size:20px; }
+  #inventory p { margin:0 0 15px; color:#aac3cd; font-size:12px; }
+  #inventoryGrid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+  #inventoryGrid .slot { width:auto; height:66px; cursor:default; }
+  #inventoryFooter { margin-top:14px; color:#a9c3ce; font-size:11px; }
   #overlay { position:fixed; inset:0; display:grid; place-items:center; background:linear-gradient(180deg,rgba(8,22,32,.28),rgba(4,12,19,.78)); z-index:5; }
   #intro { width:min(520px,calc(100vw - 32px)); padding:34px; text-align:center; border-radius:22px; background:rgba(8,20,29,.78); border:1px solid rgba(255,255,255,.2); box-shadow:0 25px 90px #0007; backdrop-filter:blur(18px); }
   #intro .eyebrow { color:#9fd5d9; font-size:11px; letter-spacing:.25em; text-transform:uppercase; }
@@ -36,7 +50,7 @@
   .pad { display:grid; grid-template-columns:repeat(3,42px); grid-template-rows:repeat(2,42px); gap:5px; pointer-events:auto; }
   .pad button { border:1px solid #ffffff55; background:#142c3b88; color:white; border-radius:10px; font-size:17px; touch-action:none; }
   #lookHint { color:#8fb2bf; font-size:11px; margin-top:13px; }
-  @media (pointer:coarse) { #mobile { display:flex; } #bottom { bottom:125px; } }
+  @media (pointer:coarse) { #mobile { display:flex; } #bottom { bottom:125px; } #hotbar { bottom:76px; gap:4px; } .slot { width:42px; height:48px; } .slot .item-name { font-size:8px; } }
 </style>
 </head>
 <body>
@@ -44,8 +58,15 @@
   <div id="brand" class="panel"><strong>Infinite Horizons</strong><span>THE WORLD IS YOURS TO DISCOVER</span></div>
   <div id="stats" class="panel">POSITION <b id="coords">0, 0</b><br>BIOME <b id="biome">Meadow</b><br>TIME <b id="clock">08:00</b></div>
   <div id="crosshair"></div>
-  <div id="bottom" class="panel">WASD move · Mouse look · Shift sprint · Space jump · Esc pause</div>
+  <div id="bottom" class="panel">WASD move · Mouse look · Shift sprint · Space jump · E inventory · Click mine</div>
   <div id="toast" class="panel">World generated</div>
+</div>
+<div id="hotbar" aria-label="Hotbar"></div>
+<div id="inventory" class="panel">
+  <h2>Backpack</h2>
+  <p>Resources and tools you've collected on your journey.</p>
+  <div id="inventoryGrid"></div>
+  <div id="inventoryFooter">Press E to close · Select tools with 1–8</div>
 </div>
 <div id="mobile">
   <div class="pad">
@@ -95,6 +116,8 @@ scene.add(sun);
 
 const CHUNK = 32, SEG = 24, RADIUS = 2;
 const chunks = new Map();
+const harvested = new Set();
+const harvestables = new Map();
 const mats = {
   grass: new THREE.MeshStandardMaterial({color:0x6f9c55, roughness:1}),
   forest: new THREE.MeshStandardMaterial({color:0x527c48, roughness:1}),
@@ -126,14 +149,20 @@ function biomeAt(x,z) {
   const v=noise(x*.006+300,z*.006-200);
   return v>.28?'Highlands':v<-.28?'Forest':'Meadow';
 }
-function makeTree(parent,x,y,z,scale,seed) {
-  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.13*scale,.2*scale,1.5*scale,6),mats.trunk);
-  trunk.position.set(x,y+.75*scale,z); trunk.castShadow=true; parent.add(trunk);
+function makeTree(parent,x,y,z,scale,seed,id) {
+  const tree=new THREE.Group();
+  tree.position.set(x,y,z);
+  tree.userData={harvestable:'tree',id,hp:3,maxHp:3};
+  const size=scale*2.15;
+  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.16*size,.24*size,2.2*size,7),mats.trunk);
+  trunk.position.y=1.1*size; trunk.castShadow=true; tree.add(trunk);
   const leafMat=mats.leaves[Math.floor(seed*3)%3];
-  const crown=new THREE.Mesh(new THREE.ConeGeometry(.95*scale,2.5*scale,7),leafMat);
-  crown.position.set(x,y+2.15*scale,z); crown.castShadow=true; parent.add(crown);
-  const crown2=new THREE.Mesh(new THREE.ConeGeometry(.72*scale,1.9*scale,7),leafMat);
-  crown2.position.set(x,y+2.9*scale,z); crown2.castShadow=true; parent.add(crown2);
+  const crown=new THREE.Mesh(new THREE.ConeGeometry(1.15*size,3.0*size,7),leafMat);
+  crown.position.y=3.0*size; crown.castShadow=true; tree.add(crown);
+  const crown2=new THREE.Mesh(new THREE.ConeGeometry(.88*size,2.4*size,7),leafMat);
+  crown2.position.y=4.35*size; crown2.castShadow=true; tree.add(crown2);
+  parent.add(tree);
+  return tree;
 }
 function buildChunk(cx,cz) {
   const group=new THREE.Group(); group.position.set(cx*CHUNK,0,cz*CHUNK);
@@ -162,13 +191,19 @@ function buildChunk(cx,cz) {
     const wz=cz*CHUNK+hash(cx*31-i,cz*113+i)*CHUNK;
     const y=heightAt(wx,wz), r=hash(cx*151+i,cz*181-i);
     const biome=biomeAt(wx,wz);
+    const objectId=`${cx},${cz}:${i}`;
+    if(harvested.has(objectId)) continue;
     if(r<.57 && biome!=='Highlands') {
-      const s=.65+hash(cx*17+i,cz*19-i)*.8;
-      makeTree(group,wx-cx*CHUNK,y,wz-cz*CHUNK,s,hash(cx+i,cz-i));
+      const s=.95+hash(cx*17+i,cz*19-i)*.65;
+      const tree=makeTree(group,wx-cx*CHUNK,y,wz-cz*CHUNK,s,hash(cx+i,cz-i),objectId);
+      harvestables.set(objectId,tree);
     } else if(r>.83 || biome==='Highlands' && r>.5) {
-      const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(.35+hash(i+cx,cz-i)*.65,0),mats.rock);
-      rock.position.set(wx-cx*CHUNK,y+.25,wz-cz*CHUNK);
-      rock.rotation.set(r*2,r*4,r*3); rock.scale.y=.65; rock.castShadow=true; group.add(rock);
+      const rockGroup=new THREE.Group();
+      rockGroup.position.set(wx-cx*CHUNK,y,wz-cz*CHUNK);
+      rockGroup.userData={harvestable:'stone',id:objectId,hp:4,maxHp:4};
+      const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(.85+hash(i+cx,cz-i)*.75,1),mats.rock);
+      rock.position.y=.55; rock.rotation.set(r*2,r*4,r*3); rock.scale.set(1.15,.9,1.05); rock.castShadow=true; rockGroup.add(rock);
+      group.add(rockGroup); harvestables.set(objectId,rockGroup);
     }
   }
   scene.add(group); return group;
@@ -183,7 +218,10 @@ function updateChunks() {
     const [x,z]=key.split(',').map(Number);
     if(Math.abs(x-px)>RADIUS+1 || Math.abs(z-pz)>RADIUS+1) {
       scene.remove(obj);
-      obj.traverse(o=>{if(o.geometry) o.geometry.dispose();});
+      obj.traverse(o=>{
+        if(o.userData && o.userData.id) harvestables.delete(o.userData.id);
+        if(o.geometry) o.geometry.dispose();
+      });
       chunks.delete(key);
     }
   }
@@ -193,15 +231,63 @@ const keys={};
 let yaw=0,pitch=0,velocityY=0,onGround=false,started=false,clockTime=8;
 const player={x:0,z:0};
 camera.position.set(0,heightAt(0,0)+1.75,0);
+
+// Small held starter stone, attached to the camera so it stays visible.
+const heldTool=new THREE.Group();
+const heldRock=new THREE.Mesh(new THREE.DodecahedronGeometry(.22,1),new THREE.MeshStandardMaterial({color:0x929a9a,roughness:.9}));
+heldRock.position.set(.48,-.42,-.72); heldRock.rotation.set(.25,.4,.2); heldTool.add(heldRock);
+const grip=new THREE.Mesh(new THREE.CylinderGeometry(.055,.075,.34,6),new THREE.MeshStandardMaterial({color:0x75533b}));
+grip.position.set(.43,-.57,-.7); grip.rotation.z=-.55; heldTool.add(grip);
+camera.add(heldTool);
 const overlay=document.getElementById('overlay');
 const toast=document.getElementById('toast');
 let toastTimer;
 function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('show'),1700);}
+
+// Inventory and hotbar
+const inventory={starterRock:1,wood:0,stone:0};
+const itemInfo={
+  starterRock:{name:'Rock tool',icon:'🪨',desc:'A sturdy rock for gathering materials'},
+  wood:{name:'Wood',icon:'🪵',desc:'Gathered from trees'},
+  stone:{name:'Stone',icon:'⚪',desc:'Gathered from boulders'}
+};
+const hotbar=['starterRock',null,null,null,null,null,null,null];
+let selectedSlot=0,inventoryOpen=false;
+const hotbarEl=document.getElementById('hotbar'), inventoryEl=document.getElementById('inventory');
+function slotMarkup(item,index,hot=false){
+  const info=itemInfo[item];
+  const count=item?inventory[item]||0:0;
+  return `<div class="slot ${hot&&selectedSlot===index?'selected':''}" ${hot?`data-slot="${index}"`:''}>
+    ${hot?`<span class="number">${index+1}</span>`:''}
+    <span class="item-icon">${info?info.icon:'·'}</span>
+    <span class="item-name">${info?info.name:'Empty'}</span>
+    ${item?`<span class="count">${count}</span>`:''}
+  </div>`;
+}
+function renderInventory(){
+  hotbarEl.innerHTML=hotbar.map((item,i)=>slotMarkup(item,i,true)).join('');
+  document.querySelectorAll('#hotbar [data-slot]').forEach(el=>el.addEventListener('click',()=>selectSlot(Number(el.dataset.slot))));
+  const all=['starterRock','wood','stone'];
+  inventoryGrid.innerHTML=all.map((item,i)=>slotMarkup(item,i,false)).concat(Array.from({length:21},()=>slotMarkup(null,0,false))).join('');
+}
+function selectSlot(i){selectedSlot=Math.max(0,Math.min(7,i));renderInventory();}
+function toggleInventory(force){
+  inventoryOpen=typeof force==='boolean'?force:!inventoryOpen;
+  inventoryEl.classList.toggle('open',inventoryOpen);
+  if(inventoryOpen){document.exitPointerLock?.();renderInventory();}
+  else if(started){renderer.domElement.requestPointerLock?.();}
+}
+function addItem(item,amount){
+  inventory[item]=(inventory[item]||0)+amount;renderInventory();
+  showToast(`+${amount} ${itemInfo[item].name}`);
+}
+const inventoryGrid=document.getElementById('inventoryGrid');
+renderInventory();
 document.getElementById('play').addEventListener('click',()=>{
   started=true; overlay.style.display='none'; renderer.domElement.requestPointerLock?.(); showToast('Welcome to the wilderness');
 });
 document.addEventListener('pointerlockchange',()=>{
-  if(document.pointerLockElement!==renderer.domElement && started) overlay.style.display='grid';
+  if(document.pointerLockElement!==renderer.domElement && started && !inventoryOpen) overlay.style.display='grid';
 });
 document.addEventListener('mousemove',e=>{
   if(document.pointerLockElement!==renderer.domElement)return;
@@ -209,6 +295,8 @@ document.addEventListener('mousemove',e=>{
   pitch=Math.max(-Math.PI/2+.03,Math.min(Math.PI/2-.03,pitch));
 });
 document.addEventListener('keydown',e=>{
+  if(e.key.toLowerCase()==='e' && started){toggleInventory();e.preventDefault();return;}
+  if(/^[1-8]$/.test(e.key)){selectSlot(Number(e.key)-1);return;}
   keys[e.key.toLowerCase()]=true;
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(e.key.toLowerCase()))e.preventDefault();
   if(e.code==='Space' && onGround && started){velocityY=8.2;onGround=false;}
@@ -221,11 +309,36 @@ document.querySelectorAll('[data-key]').forEach(btn=>{
 });
 renderer.domElement.addEventListener('click',()=>{if(started && document.pointerLockElement!==renderer.domElement)renderer.domElement.requestPointerLock?.();});
 
+const miningRaycaster=new THREE.Raycaster();
+miningRaycaster.far=7;
+let lastMine=0;
+function mineTarget(){
+  if(!started || document.pointerLockElement!==renderer.domElement || inventoryOpen)return;
+  if(hotbar[selectedSlot]!=='starterRock' || inventory.starterRock<1){showToast('Equip your rock tool to mine');return;}
+  const now=performance.now(); if(now-lastMine<420)return; lastMine=now;
+  miningRaycaster.setFromCamera(new THREE.Vector2(0,0),camera);
+  const hits=miningRaycaster.intersectObjects([...harvestables.values()],true);
+  if(!hits.length){showToast('Aim at a tree or stone');return;}
+  let target=hits[0].object;
+  while(target && !target.userData.harvestable)target=target.parent;
+  if(!target)return;
+  target.userData.hp--;
+  const remaining=target.userData.hp;
+  if(remaining>0){showToast(`${target.userData.harvestable==='tree'?'Tree':'Stone'} hit · ${remaining} more`);return;}
+  const type=target.userData.harvestable,id=target.userData.id;
+  harvested.add(id); harvestables.delete(id);
+  target.parent.remove(target);
+  target.traverse(o=>{if(o.geometry)o.geometry.dispose();});
+  if(type==='tree')addItem('wood',3);
+  else addItem('stone',2);
+}
+renderer.domElement.addEventListener('mousedown',e=>{if(e.button===0)mineTarget();});
+
 let last=performance.now(), chunkCheck=0;
 function animate(now) {
   requestAnimationFrame(animate);
   const dt=Math.min((now-last)/1000,.04); last=now;
-  if(started) {
+  if(started && !inventoryOpen) {
     const forward=(keys.w||keys.arrowup?1:0)-(keys.s||keys.arrowdown?1:0);
     const side=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);
     const speed=(keys.shift?12:6)*dt;
